@@ -1,0 +1,196 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Apr  3 21:22:42 2021
+
+@author: User
+"""
+
+import numpy as np
+import pandas as pd
+import cv2
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import matplotlib.pyplot as plt
+from matplotlib.cm import get_cmap
+
+
+class CNN(nn.Module):
+    def __init__(self):
+        super(CNN, self).__init__()
+        ### hidden layer 1
+        self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=5, padding=2)    # output shape = (32, 32, 32)
+        self.relu1 = nn.ReLU()
+        self.maxpool1 = nn.MaxPool2d(kernel_size=2, stride=2)    # output shape = (32, 16, 16)
+        
+        ### hidden layer 2
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=5, padding=2)    # output shape = (64, 16, 16)
+        self.relu2 = nn.ReLU()
+        self.maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2)    # output shape = (64, 8, 8)
+        
+        ### hidden layer 3
+        self.conv3 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=5, padding=2)    # output shape = (64, 16, 16)
+        self.relu3 = nn.ReLU()
+        self.maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2)    # output shape = (64, 4, 4)
+        
+        ### output layer
+        self.fc1 = nn.Linear(64*4*4, 32)
+        self.relu4 = nn.ReLU()
+        self.fc2 = nn.Linear(32, 2)
+        self.fc3 = nn.Linear(2, 7)
+        
+    def forward(self, x):
+        x = self.maxpool1(self.relu1(self.conv1(x)))
+        x = self.maxpool2(self.relu2(self.conv2(x)))
+        output = self.maxpool3(self.relu3(self.conv3(x)))
+        output = output.view(output.size(0), -1)
+        output = self.relu4(self.fc1(output))
+        self.fc2output = self.fc2(output)
+        output = self.fc3(self.fc2output)
+        return output
+    
+    def plot_figure_loss_acc(self, train_acc, train_loss, test_acc, test_loss):
+        plt.figure(figsize=(6.4*2, 4.8))
+        plt.subplot(121)
+        plt.plot(train_loss, label='Training')
+        plt.plot(test_loss, label='Testing')
+        plt.title('Average Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Cross entropy Loss')
+        plt.legend(loc='best')
+        
+        plt.subplot(122)
+        plt.plot(train_acc, label='Training')
+        plt.plot(test_acc, label='Testing')
+        plt.title('Total Accuracy')
+        plt.xlabel('Epochs')
+        plt.ylabel('Accuracy')
+        plt.legend(loc='best')
+        
+        plt.show()
+        
+        
+    def plot_figure_latent(self, before_epoch, before_fc2, before_test_y, after_epoch, after_fc2, after_test_y):        
+        fig = plt.figure(figsize=(6.4*2, 4.8))
+        ax = fig.add_subplot(1, 2, 1)
+        scatter = ax.scatter(before_fc2[:, 0], before_fc2[:, 1], c=before_test_y, cmap=get_cmap('tab10'))
+        ax.set_title('epoch {}'.format(before_epoch)), 
+        ax.legend(*scatter.legend_elements(), loc='upper right')
+        
+        ax = fig.add_subplot(1, 2, 2)
+        scatter = ax.scatter(after_fc2[:, 0], after_fc2[:, 1], c=after_test_y, cmap=get_cmap('tab10'))
+        ax.set_title('epoch {}'.format(after_epoch)), 
+        ax.legend(*scatter.legend_elements(), loc='upper right')
+
+
+def fit_model(train_images, train_labels, test_images, test_labels, LR=0.01, momentum=0.9, batch_size=100, epoch=100, before_epoch=25, after_epoch=70):
+
+    train_image = torch.tensor(np.stack(train_images.values))
+    train_label = torch.tensor(np.stack(train_labels.values))
+    train_tensor = torch.utils.data.TensorDataset(train_image, train_label)
+    
+    test_image = torch.tensor(np.stack(test_images.values))
+    test_label = torch.tensor(np.stack(test_labels.values))
+    test_tensor = torch.utils.data.TensorDataset(test_image, test_label)
+    
+    train_loader = torch.utils.data.DataLoader(train_tensor, batch_size=batch_size, shuffle=True)
+    test_loader = torch.utils.data.DataLoader(test_tensor, batch_size=len(test_tensor), shuffle=True)
+
+    ### CNN model   
+    CNN_model = CNN()
+    print(CNN_model)
+    optimizer = optim.SGD(CNN_model.parameters(), lr=LR, momentum=momentum)
+    criterion = nn.CrossEntropyLoss()
+    
+    train_lossList = []
+    train_accuracyList = []
+    test_lossList = []
+    test_accuracyList = []
+    
+    ### epoch
+    for ep in range(epoch):
+        print('epoch: ', ep)
+        train_correct = 0.0
+        train_total = 0.0
+        total_train_loss = 0.0
+        ### iteration
+        for data in train_loader:
+            train_X, train_y = data
+            optimizer.zero_grad()
+            train_X = torch.tensor(train_X, dtype=torch.float32)
+            train_pred = CNN_model(train_X.view(len(train_X), -1, 32, 32))
+            train_loss = criterion(train_pred, train_y)
+            train_loss.backward()
+            optimizer.step()    # 更新參數
+            
+            ### count the correct prediction
+            _, train_pred = torch.max(train_pred.data, dim=1)
+            train_total += train_y.size(0)
+            train_correct += (train_pred == train_y).sum().item()
+            
+            ### calculate the average loss
+            total_train_loss += train_loss.item()
+        
+        ### accracy and loss of train
+        train_accuracy = 100 * train_correct / train_total
+        train_avg_loss = total_train_loss / train_total
+        train_accuracyList.append(train_accuracy)
+        train_lossList.append(train_avg_loss)
+        print('train_accuracy: {} %'.format(round(train_accuracy, 3)), 'train_avg_loss: ', round(train_avg_loss, 3), end=' | ')
+        
+        
+        ### test
+        test_correct = 0.0
+        test_total = 0.0
+        total_test_loss = 0.0
+        with torch.no_grad():
+            for data in test_loader:
+                test_X, test_y = data
+                test_X = torch.tensor(test_X, dtype=torch.float32)
+                test_pred = CNN_model(test_X.view(len(test_X), -1, 32, 32))
+                test_loss = criterion(test_pred, test_y)
+                
+                ### record the result of n epoch to plot the latent feature distribution
+                if ep == before_epoch:
+                    before_fc2 = CNN_model.fc2output
+                    before_test_y = test_y
+                elif ep == after_epoch:
+                    after_fc2 = CNN_model.fc2output
+                    after_test_y = test_y
+                
+                ### count the correct prediction
+                _, test_pred = torch.max(test_pred.data, dim=1)
+                test_total += test_y.size(0)
+                test_correct += (test_pred == test_y).sum().item()
+                
+                ### calculate the average loss
+                total_test_loss += test_loss.item()
+            
+            ### accracy and loss of test
+            test_accuracy = 100 * test_correct / test_total
+            test_avg_loss = total_test_loss / test_total
+            test_accuracyList.append(test_accuracy)
+            test_lossList.append(test_avg_loss)
+            print('test_accuracy: {} %'.format(round(test_accuracy, 3)), 'test_avg_loss: ', round(test_avg_loss, 3))
+            
+    ### plot figures
+    CNN_model.plot_figure_loss_acc(train_accuracyList, train_lossList, test_accuracyList, test_lossList)
+    CNN_model.plot_figure_latent(before_epoch, before_fc2.numpy(), before_test_y.numpy(), after_epoch, after_fc2.numpy(), after_test_y.numpy())
+
+
+### main
+with open('train.csv') as csvfile:
+    train = pd.read_csv(csvfile, delimiter=',')
+    train['image'] = train['file_name'].apply(lambda x: cv2.imread('images/'+x) / 255)
+train['crop_img'] = train.apply(lambda x: cv2.resize(x['image'][x['y1']:x['y2'], x['x1']:x['x2']], (32, 32), interpolation=cv2.INTER_AREA), axis=1)
+train['image'] = train['image'].apply(lambda x: cv2.resize(x, (32, 32), interpolation=cv2.INTER_AREA))
+
+with open('test.csv') as csvfile:
+    test = pd.read_csv(csvfile, delimiter=',')
+    test['image'] = test['file_name'].apply(lambda x: cv2.imread('images/'+x) / 255)
+test['crop_img'] = test.apply(lambda x: cv2.resize(x['image'][x['y1']:x['y2'], x['x1']:x['x2']], (32, 32), interpolation=cv2.INTER_AREA), axis=1)
+test['image'] = test['image'].apply(lambda x: cv2.resize(x, (32, 32), interpolation=cv2.INTER_AREA))
+
+### image v.s. cropping image
+fit_model(train['image'], train['category'], test['image'], test['category'])
+fit_model(train['crop_img'], train['category'], test['crop_img'], test['category'])
